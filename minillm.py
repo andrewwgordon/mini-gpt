@@ -1465,10 +1465,49 @@ if __name__ == "__main__":
     # GENERATE
     if args.generate:
         try:
-            model.load_state_dict(torch.load("minilm.pt", map_location="cpu"))
-            print("[INFO] Loaded saved model minilm.pt")
-        except:
-            print("[WARN] Using untrained model—generation quality will be low.")
+            # Robust checkpoint loader:
+            # - Strips `module.` prefix saved by DataParallel
+            # - Filters tensors to only those whose shapes match the current model
+            # - Prints diagnostics so you can detect hyperparameter/vocab mismatches
+            # This prevents size mismatch errors when loading checkpoints created
+            # with a different architecture or training wrapper.
+            # Use this for safe partial loads; for full loads, recreate the model
+            # with the exact hyperparameters used at save time.
+            # Load checkpoint and normalize keys (handle DataParallel prefix)
+            state = torch.load("minilm.pt", map_location="cpu")
+            if isinstance(state, dict) and any(k.startswith("module.") for k in state.keys()):
+                state = {k.replace("module.", ""): v for k, v in state.items()}
+
+            model_state = model.state_dict()
+
+            # Keep only tensors that both exist in the model and match shape
+            filtered_state = {}
+            for k, v in state.items():
+                if k in model_state and v.size() == model_state[k].size():
+                    filtered_state[k] = v
+
+            loaded_keys = set(filtered_state.keys())
+            ckpt_keys = set(state.keys())
+            model_keys = set(model_state.keys())
+
+            print(f"[INFO] checkpoint keys: {len(ckpt_keys)}")
+            print(f"[INFO] model keys: {len(model_keys)}")
+            print(f"[INFO] loaded matching keys: {len(loaded_keys)}")
+
+            missing_keys = model_keys - loaded_keys
+            unexpected_keys = ckpt_keys - model_keys
+            if missing_keys:
+                print(f"[WARN] {len(missing_keys)} model parameters were not found in the checkpoint; they will keep their initialized values.")
+            if unexpected_keys:
+                print(f"[WARN] {len(unexpected_keys)} unexpected keys were present in the checkpoint.")
+
+            # Update model state with matching tensors and load
+            model_state.update(filtered_state)
+            model.load_state_dict(model_state)
+            print(f"[INFO] Loaded {len(loaded_keys)} tensors from minilm.pt (partial load allowed).")
+
+        except Exception as e:
+            print(f"[ERROR] Unable to load model: {e}")
 
         out = generate(model, tokenizer, args.prompt)
         print("\n=== GENERATED TEXT ===\n")

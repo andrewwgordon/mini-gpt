@@ -18,216 +18,170 @@ MiniLM is an educational implementation of a GPT-style transformer language mode
 - Python 3.7 or higher
 - PyTorch
 - HuggingFace Datasets library
+"""README for mini-gpt (educational mini GPT implementation)
 
-### Installation
+This file provides an overview, quick start instructions, and a concise
+explanation of the deep learning concepts used by the project.
+"""
 
-1. Clone or download this repository
-2. Install dependencies:
+# mini-gpt — Miniature GPT-style Language Model (Educational)
+
+mini-gpt is a compact, educational implementation of a GPT-style (decoder-only) transformer that operates at the character level. The code is intentionally small and readable so you can study the core components of modern neural language models: tokenization, embeddings, causal self-attention, transformer blocks, training loop, and autoregressive generation.
+
+**Repository layout**
+- `minillm.py` — Main script: tokenizer, model, training loop, generation, and the CLI.
+- `minilm.pt` / `tinygpt.pt` — Example model checkpoints (if present).
+- `tests/` — Minimal tests to validate basic script behaviour.
+
+**Goals**
+- Explain a working GPT-style model in a few hundred lines of PyTorch.
+- Provide a configurable experiment harness to change `embed_dim`, `num_layers`, `num_heads`, and other hyperparameters.
+- Be runnable on CPU (small models) or GPU (if available) with minimal dependencies.
+
+**What this project is not**
+- Not a production LLM; it is designed for learning and experimentation.
+- Not optimized for speed or memory (no KV-cache, quantization, or distributed training helpers).
+
+**Quick Start**
+
+Requirements
+- Python 3.8+
+- PyTorch
+- HuggingFace `datasets` (optional; script falls back to small sample text if offline)
+
+Install dependencies
 
 ```bash
+pip install -r requirements.txt
+# or, at minimum
 pip install torch datasets
 ```
 
-### Running the Project
-
-#### Training a Model
-
-Train a model with default hyperparameters:
+Train a small model (default configuration)
 
 ```bash
-python main.py --train --steps 500
+python minillm.py --train --steps 500
 ```
 
-Train with custom architecture:
+Train with custom architecture
 
 ```bash
-python main.py --train --steps 1000 --embed_dim 256 --num_layers 4 --num_heads 8 --batch_size 64
+python minillm.py --train --steps 1000 --embed_dim 256 --num_layers 4 --num_heads 8 --batch_size 64
 ```
 
-#### Generating Text
-
-After training, generate text from a prompt:
+Generate text from a checkpoint
 
 ```bash
-python main.py --generate --prompt "The quick brown fox"
+python minillm.py --generate --prompt "The quick brown fox"
 ```
 
-### Available Hyperparameters
+If you saved a model to `minilm.pt` with different hyperparameters, create the same model configuration on load (same `embed_dim`, `num_layers`, `num_heads`, `block_size`, `vocab_size`), otherwise you will see size mismatch errors. The script contains a robust loader that helps detect and partially load matching tensors — see "Troubleshooting" below.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--batch_size` | 32 | Number of sequences per training batch |
-| `--block_size` | 128 | Maximum sequence length (context window) |
-| `--embed_dim` | 128 | Embedding dimension for tokens |
-| `--num_heads` | 4 | Number of attention heads |
-| `--num_layers` | 2 | Number of transformer blocks |
-| `--mlp_ratio` | 4 | MLP hidden size multiplier |
-| `--learning_rate` | 3e-4 | Adam optimizer learning rate |
-| `--steps` | 200 | Number of training steps |
-| `--eval_interval` | 50 | Steps between loss reporting |
+CLI flags (important ones)
+- `--train`: run training loop and save `minilm.pt` when finished
+- `--generate`: load `minilm.pt` (if present) and generate text from `--prompt`
+- `--prompt`: text prompt for generation (default: `"Hello:"`)
+- `--batch_size` (default 32)
+- `--block_size` (default 128)
+- `--embed_dim` (default 128)
+- `--num_heads` (default 4)
+- `--num_layers` (default 2)
+- `--mlp_ratio` (default 4)
+- `--learning_rate` (default 3e-4)
+- `--steps` (default 200)
+- `--eval_interval` (default 50)
 
-## Code Architecture
+Design and Implementation Notes
 
-### 1. Data Loading (`load_wikitext`)
+- Tokenization: character-level `CharTokenizer` built from the training text (no BPE).
+- Model: `MiniGPT` — token + position embeddings, stack of `TransformerBlock` modules with pre-layernorm, and final LM head.
+- Attention: causal multi-head self-attention with a lower-triangular mask.
+- Training: next-token prediction using cross-entropy loss, AdamW optimizer.
 
-The script uses the WikiText-2 dataset from HuggingFace, a collection of Wikipedia articles commonly used for language modeling benchmarks. The data is concatenated into a single text string for processing. A fallback mechanism provides sample text if the dataset is unavailable.
+Deep Learning Theory (concise)
 
-### 2. Character Tokenizer (`CharTokenizer`)
+Transformers
+- Replaced recurrence with attention mechanisms (Vaswani et al., 2017).
+- Self-attention computes pairwise relations between tokens enabling long-range dependencies.
 
-Instead of using subword tokenization (like BPE), this implementation uses character-level tokenization:
+Scaled Dot-Product Attention
+- Compute Q, K, V projections; attention weights = softmax(Q K^T / sqrt(d_k)).
+- `d_k` scaling keeps gradients stable for larger embedding sizes.
 
-- **Vocabulary**: Built from unique characters in the training data
-- **Encoding**: Maps characters to integer indices
-- **Decoding**: Converts indices back to readable text
-- **Advantage**: No out-of-vocabulary tokens, completely transparent
+Multi-Head Attention
+- Multiple attention heads allow the model to attend to different subspaces and types of relationships in parallel.
 
-### 3. Transformer Components
+Causal Masking
+- Ensures autoregressive prediction: each position only attends to itself and previous positions (no peeking into the future).
 
-#### Self-Attention (`SelfAttention`)
+Position Embeddings
+- Adds positional information to token embeddings so the model can utilize order.
+- This code uses learned position embeddings; alternatives include sinusoidal encodings or Rotary embeddings (RoPE).
 
-Implements multi-head causal self-attention:
+Training Objective
+- The model is trained to minimize negative log-likelihood / cross-entropy of next-token predictions:
 
-- Splits embedding dimension across multiple attention heads
-- Computes queries, keys, and values for each position
-- Uses scaled dot-product attention with causal masking
-- Prevents the model from "looking ahead" during training
+	Loss = -∑ log P(token_t | token_<t)
 
-#### Transformer Block (`TransformerBlock`)
+This is self-supervised; the training data (text) provides the supervision.
 
-Combines attention and feedforward layers:
+Why character-level?
+- Pros: no OOV tokens, simpler tokenizer, great for teaching.
+- Cons: longer sequences per semantic unit, slower to learn some patterns, larger effective context required.
 
-- **Pre-normalization**: LayerNorm before attention and MLP
-- **Residual connections**: Adds input to output of each sublayer
-- **MLP**: Two-layer feedforward network with ReLU activation
+Troubleshooting: model size / shape mismatches
 
-#### MiniGPT Model (`MiniGPT`)
+Common cause: saved checkpoint parameters do not match the model you instantiated (different `embed_dim`, `num_layers`, `num_heads`, `block_size`, or `vocab_size`).
 
-The complete language model:
+The repo's loader in `minillm.py` includes a robust loading routine that:
+- Strips `module.` prefixes from keys (if saved from `DataParallel`).
+- Filters checkpoint tensors to only those whose names and shapes match the model's state dict.
+- Prints diagnostics showing checkpoint keys count, model keys count, loaded keys count, and warnings for missing/unexpected keys.
 
-- **Token embeddings**: Learned vectors for each character
-- **Position embeddings**: Learned vectors encoding sequence position
-- **Stacked transformer blocks**: Configurable depth
-- **Output head**: Projects to vocabulary logits
+Recommended workflow to avoid errors:
+1. Save hyperparameters alongside checkpoints (not implemented here by default). Keep a note of the model configuration used to train each checkpoint.
+2. Recreate the exact model when loading: same `embed_dim`, `num_layers`, `num_heads`, `block_size`, and `vocab_size`.
+3. If you intentionally change architecture and want to reuse parts of a checkpoint (e.g., token embeddings), use the robust loader or a custom script to selectively copy matching tensors.
 
-### 4. Training Loop (`train`)
+Example diagnostic snippet (already integrated in `minillm.py`):
 
-Implements supervised next-token prediction:
+```python
+# Loads checkpoint, strips `module.` prefix, and prints counts for keys/shapes
+state = torch.load("minilm.pt", map_location="cpu")
+# ... filter / compare ...
+```
 
-- Samples random sequences from the dataset
-- Computes cross-entropy loss between predictions and targets
-- Updates model parameters using AdamW optimizer
-- Periodically reports loss and saves the trained model
+Extending and experiments
 
-### 5. Text Generation (`generate`)
+- Try increasing `embed_dim`, `num_layers`, and `num_heads` to see quality gains (watch memory).
+- Implement KV-cache to speed up generation (necessary for larger models and longer contexts).
+- Replace character tokenizer with a subword tokenizer (e.g., SentencePiece) to compare training speed and quality.
+- Add checkpointing / resume training and validation evaluation.
 
-Autoregressive sampling:
+Tests
 
-- Starts with a prompt encoded as token indices
-- Iteratively predicts the next token
-- Applies temperature scaling for randomness control
-- Uses top-k sampling to improve quality
+Run the minimal tests in `tests/` (if present):
 
-## Machine Learning Theory
+```bash
+pytest -q
+```
 
-### Transformer Architecture
+(if `pytest` is not installed: `pip install pytest`)
 
-The transformer, introduced in "Attention Is All You Need" (Vaswani et al., 2017), revolutionized sequence modeling by replacing recurrence with attention mechanisms.
+License & Attribution
 
-#### Self-Attention Mechanism
+This is an educational project. Code is free to use for learning and experimentation. See `LICENSE` for details.
 
-Self-attention allows each position in a sequence to attend to all other positions, computing representations based on relevance:
+Acknowledgements
 
-**Q·K^T / √d_k** produces attention scores, where:
-- **Q** (queries): "what am I looking for?"
-- **K** (keys): "what do I offer?"
-- **V** (values): "what information do I contain?"
+- Core ideas: Vaswani et al. "Attention Is All You Need" (2017)
+- Dataset example: WikiText-2
 
-The scaling factor √d_k prevents gradients from becoming too small in high dimensions.
+---
 
-#### Multi-Head Attention
+If you'd like, I can also:
+- Save the model hyperparameters with checkpoints (small JSON file alongside `minilm.pt`).
+- Add an `inspect_ckpt.py` helper that prints key/shape diffs between a checkpoint and a model instantiation.
+- Add a brief developer guide to reproduce training runs and hyperparameter tuning.
 
-Instead of single attention, we run multiple attention operations in parallel:
-
-- Each head learns different relationships (syntax, semantics, long-range dependencies)
-- Outputs are concatenated and projected back to the embedding dimension
-- Increases model capacity without dramatically increasing parameters
-
-#### Causal Masking
-
-For language modeling, we prevent positions from attending to future tokens:
-
-- A triangular mask sets future positions to -∞ before softmax
-- Ensures the model learns to predict based only on past context
-- Critical for autoregressive generation
-
-### Language Modeling Objective
-
-The model learns by predicting the next token in a sequence:
-
-**Loss = -∑ log P(token_t | token_1, ..., token_{t-1})**
-
-This self-supervised objective requires no labeled data—the text itself provides supervision.
-
-### Position Embeddings
-
-Transformers have no inherent notion of sequence order, so we add positional information:
-
-- Learned embeddings (used here) are simply looked up for each position
-- Alternative: sinusoidal encodings use mathematical functions
-- Added to token embeddings before processing
-
-### Residual Connections and Layer Normalization
-
-These architectural choices enable training deep networks:
-
-- **Residual connections**: Allow gradients to flow directly through the network
-- **Layer normalization**: Stabilizes training by normalizing activations
-- **Pre-norm architecture**: Applies normalization before each sublayer (more stable)
-
-### Character-Level Modeling
-
-This implementation uses characters rather than subwords:
-
-**Advantages**:
-- No vocabulary limits or unknown tokens
-- Perfect for educational purposes
-- Works for any text without preprocessing
-
-**Disadvantages**:
-- Longer sequences needed to represent the same information
-- Harder to capture long-range semantic relationships
-- Requires more compute for the same "conceptual" context
-
-### Sampling Strategies
-
-During generation, we convert logits to a probability distribution:
-
-- **Temperature**: Controls randomness (low = conservative, high = creative)
-- **Top-k sampling**: Only considers the k most probable tokens
-- Balances between deterministic (greedy) and fully random sampling
-
-## Further Exploration
-
-### Experiment Ideas
-
-1. **Scaling up**: Increase `embed_dim`, `num_layers`, or `num_heads` to see how model capacity affects quality
-2. **Context length**: Modify `block_size` to give the model longer memory
-3. **Training duration**: Run more `steps` for better convergence
-4. **Generation tuning**: Adjust temperature and top_k during generation
-
-### Theoretical Extensions
-
-- Replace learned positional embeddings with rotary (RoPE) or ALiBi
-- Implement attention dropout or MLP dropout for regularization
-- Add gradient clipping to prevent instability
-- Experiment with different activation functions (GELU, SwiGLU)
-
-## References
-
-- Vaswani et al. (2017): "Attention Is All You Need"
-- Radford et al. (2019): "Language Models are Unsupervised Multitask Learners" (GPT-2)
-- Merity et al. (2016): "Pointer Sentinel Mixture Models" (WikiText dataset)
-
-## License
-
-This is an educational project. Feel free to use, modify, and learn from the code.
+Tell me which of the above you'd prefer next.
