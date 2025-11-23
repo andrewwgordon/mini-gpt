@@ -176,12 +176,3 @@ Acknowledgements
 
 - Core ideas: Vaswani et al. "Attention Is All You Need" (2017)
 - Dataset example: WikiText-2
-
----
-
-If you'd like, I can also:
-- Save the model hyperparameters with checkpoints (small JSON file alongside `minilm.pt`).
-- Add an `inspect_ckpt.py` helper that prints key/shape diffs between a checkpoint and a model instantiation.
-- Add a brief developer guide to reproduce training runs and hyperparameter tuning.
-
-Tell me which of the above you'd prefer next.
